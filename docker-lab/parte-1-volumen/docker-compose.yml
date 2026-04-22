@@ -1,0 +1,78 @@
+# =============================================================================
+#  DOCKER COMPOSE — Parte 1: Nginx + Volumen Local
+# =============================================================================
+#
+#  NOTA: La clave "version" fue eliminada intencionalmente.
+#  En Docker Compose v2 (actual) es obsoleta y genera un warning.
+#  El formato moderno no la necesita.
+#
+#  Comandos esenciales:
+#    docker compose up -d --build   → construir imagen y levantar
+#    docker compose down            → parar y eliminar contenedores
+#    docker compose logs -f         → logs en tiempo real
+#    docker compose ps              → estado de los servicios
+# =============================================================================
+
+services:
+
+  web:
+    # ── Construcción de la imagen ────────────────────────────────────────────
+    # Docker construye la imagen usando el Dockerfile del directorio actual.
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: nginx-lab-1
+
+    # ── Puertos ──────────────────────────────────────────────────────────────
+    # "PUERTO_HOST:PUERTO_CONTENEDOR"
+    # Accedé desde el navegador en: http://localhost:8080
+    ports:
+      - "8080:8080"
+
+    # ── Volúmenes ────────────────────────────────────────────────────────────
+    # ★ Esta es la magia de la Parte 1 ★
+    #
+    # BIND MOUNT: conecta tu carpeta local html/ con el directorio
+    # donde Nginx busca archivos HTML dentro del contenedor.
+    #
+    # → Editás html/index.html con tu editor
+    # → Recargás el navegador
+    # → Los cambios aparecen INMEDIATAMENTE sin reconstruir nada
+    #
+    # ":ro" = read-only: el contenedor solo puede LEER, no modificar
+    #         tus archivos. Principio de mínimo privilegio.
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+
+    # ── Política de reinicio ─────────────────────────────────────────────────
+    # El contenedor se reinicia si falla, excepto si lo paramos manualmente.
+    restart: unless-stopped
+
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+
+    # ── Límites de recursos ──────────────────────────────────────────────────
+    # Evita que el contenedor consuma todos los recursos del host.
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "64M"
+        reservations:
+          cpus: "0.1"
+          memory: "32M"
+
+    # ── Logs ─────────────────────────────────────────────────────────────────
+    # Rotación automática: máximo 10MB por archivo, máximo 3 archivos.
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ── Redes ─────────────────────────────────────────────────────────────────────
+networks:
+  default:
+    name: docker-lab-network
+    driver: bridge

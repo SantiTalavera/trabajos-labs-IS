@@ -1,0 +1,165 @@
+# =============================================================================
+#  DOCKER COMPOSE — Parte 2: Multi-Stage + Hot Reload
+# =============================================================================
+#
+#  Este archivo define DOS perfiles de ejecución:
+#
+#  🔧 DESARROLLO (dev):
+#    → Usa bind mount de src/ para cambios en tiempo real
+#    → No necesita reconstruir la imagen al editar código
+#    → Comando: docker compose --profile dev up -d
+#
+#  🚀 PRODUCCIÓN (prod):
+#    → Usa la imagen construida con multi-stage build
+#    → Los archivos están dentro de la imagen (no en volúmenes)
+#    → Comando: docker compose --profile prod up -d --build
+#
+#  ¿Por qué dos perfiles?
+#  -----------------------
+#  El workflow de desarrollo es diferente al de producción:
+#  • En DEV queremos cambios instantáneos sin rebuilds
+#  • En PROD queremos una imagen auto-contenida, portable y optimizada
+#
+#  Los "profiles" de Compose permiten activar servicios selectivamente.
+# =============================================================================
+
+
+# ── Servicios ─────────────────────────────────────────────────────────────────
+services:
+
+  # ===========================================================================
+  #  MODO DESARROLLO — Hot Reload con Bind Mount
+  # ===========================================================================
+  #  La imagen base de Nginx ya está lista. El truco del "live reload" es:
+  #  montar src/ directamente en /usr/share/nginx/html dentro del contenedor.
+  #
+  #  Cada vez que guardás un archivo en src/ con tu editor, Nginx lo lee
+  #  en el próximo request HTTP → ¡sin reiniciar nada! 🔄
+  # ===========================================================================
+  web-dev:
+    # Perfil: este servicio SOLO se inicia con --profile dev
+    profiles:
+      - dev
+
+    # Usamos la imagen de Nginx directamente (sin reconstruir)
+    # En desarrollo no nos importa el multi-stage; queremos velocidad
+    image: nginx:1.27-alpine
+
+    container_name: nginx-lab-2-dev
+
+    # Copiamos nuestra configuración personalizada al iniciar el contenedor
+    # usando el mecanismo de entrypoint override + volumes
+    volumes:
+      # ★ HOT RELOAD ★
+      # Bind mount: src/ del host → html/ del contenedor
+      # Modo "rw" (read-write) porque en dev puede ser útil que el contenedor
+      # pueda escribir (ej: frameworks que generan archivos en runtime)
+      - ./src:/usr/share/nginx/html:ro
+
+      # Montamos nuestra configuración de nginx personalizada
+      # Así no tenemos que reconstruir la imagen para cambiar la config
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+
+    ports:
+      - "8081:8080"
+      # En modo dev usamos el puerto 80 del contenedor (corremos como root
+      # por simplicidad, ya que es solo para desarrollo local)
+      # Accedé en: http://localhost:8081
+
+    restart: unless-stopped
+
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+
+    # En desarrollo no necesitamos límites de recursos estrictos
+    # (queremos que el contenedor tenga todos los recursos disponibles)
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+    # ── Labels ──────────────────────────────────────────────────────────────
+    # Los labels son metadatos que se pueden filtrar con "docker ps --filter"
+    labels:
+      - "environment=development"
+      - "project=docker-lab"
+      - "tier=frontend"
+
+
+  # ===========================================================================
+  #  MODO PRODUCCIÓN — Multi-Stage Build
+  # ===========================================================================
+  #  Aquí construimos la imagen usando el Dockerfile multi-stage.
+  #  La imagen resultante es auto-contenida: no depende de archivos del host.
+  #
+  #  Para desplegar en otro servidor, solo necesitás:
+  #    1. Hacer push de la imagen a un registry (Docker Hub, ECR, GCR, etc.)
+  #    2. En el servidor: docker pull + docker run
+  #  No necesitás copiar el código fuente ni instalar nada. ✅
+  # ===========================================================================
+  web-prod:
+    profiles:
+      - prod
+
+    # "build" con target: construimos SOLO hasta el stage "production"
+    # (ignoramos el stage "builder" en la imagen final)
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production    # ← Fuerza construir solo hasta este stage
+      # Argumento opcional para versionar la imagen
+      args:
+        - BUILD_DATE=${BUILD_DATE:-unknown}
+        - GIT_COMMIT=${GIT_COMMIT:-unknown}
+
+    container_name: nginx-lab-2-prod
+
+    ports:
+      - "8082:8080"
+      # Accedé en: http://localhost:8082
+
+    restart: unless-stopped
+
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+
+    # ── Límites de recursos para producción ───────────────────────────────────
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "64M"
+        reservations:
+          cpus: "0.1"
+          memory: "32M"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    labels:
+      - "environment=production"
+      - "project=docker-lab"
+      - "tier=frontend"
+
+    # ── Healthcheck a nivel Compose ───────────────────────────────────────────
+    # Complementa al HEALTHCHECK del Dockerfile.
+    # Compose espera a que el servicio esté "healthy" antes de iniciar
+    # servicios que dependan de éste (ej: un backend que dependa del proxy)
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+
+# ── Redes ─────────────────────────────────────────────────────────────────────
+networks:
+  default:
+    name: docker-lab-network
+    driver: bridge

@@ -1,0 +1,11 @@
+{
+  "name": "docker-lab-parte-2",
+  "version": "1.0.0",
+  "description": "Lab Docker - Multi-stage build con Nginx",
+  "scripts": {
+    "build": "node build.js"
+  },
+  "keywords": ["docker", "nginx", "multi-stage"],
+  "author": "Docker Lab",
+  "license": "MIT"
+}
